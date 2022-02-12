@@ -120,7 +120,7 @@ if __name__ == "__main__":
           "Upload: {}\n".format(speed[1]),
           "================== SUMMARY ==================",
           "Average Download Speed: {} Mbps".format(summary[0]),
-          "Average Upload Speed: {} Mbps".format(summary[1]),
+          "Average Upload Speed: {} Mbps\n".format(summary[1]),
           sep='\n'
           )
 
