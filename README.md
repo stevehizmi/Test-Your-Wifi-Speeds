@@ -1,5 +1,5 @@
 # Test-Your-Wifi-Speeds
-Scrapes three speed test websites to give you a more accurate estimation on your download/upload speeds.
+Sequentially runs three speed test websites to give you a more accurate estimation on your download/upload speeds.
 Takes about 2 minutes and 15 seconds to finish executing.
 
 ## HOW TO RUN
