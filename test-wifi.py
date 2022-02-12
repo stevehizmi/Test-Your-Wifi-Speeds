@@ -81,9 +81,9 @@ def speedtestdotnet(driver):
     elem.click()
 
     print("Calculating Download Speed...")
-    time.sleep(20)
+    time.sleep(22)
     print("Calculating Upload Speed...")
-    time.sleep(19)
+    time.sleep(21)
 
     elem = driver.find_element(By.XPATH, "//*[@id='container']/div/div[3]/div/div/div/div[2]/div[3]/div[3]/div/div[3]/div/div/div[2]/div[1]/div[2]/div/div[2]/span")
     speeds.append(float(re.findall(r"[0-9]*[.,][0-9]*", elem.text)[0]))
