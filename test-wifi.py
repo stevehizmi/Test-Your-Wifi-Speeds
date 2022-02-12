@@ -9,7 +9,7 @@ from selenium.webdriver.support import expected_conditions as ec
 
 
 def xfinity_test(driver):
-    print("Xfinity Speed Test Running...")
+    print("\nXfinity Speed Test Running...")
 
     speeds = []
 
@@ -47,7 +47,7 @@ def xfinity_test(driver):
 
 
 def fastdotcom_test(driver):
-    print("Fast.com speed test running...")
+    print("\nFast.com speed test running...")
     speeds = []
 
     driver.get("https://fast.com/")
@@ -72,7 +72,7 @@ def fastdotcom_test(driver):
 
 
 def speedtestdotnet(driver):
-    print("Speedtest.net speed test running...")
+    print("\nSpeedtest.net speed test running...")
     speeds = []
 
     driver.get("https://www.speedtest.net/")
