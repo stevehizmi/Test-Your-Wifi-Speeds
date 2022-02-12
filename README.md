@@ -9,6 +9,6 @@ Takes about 2 minutes and 15 seconds to finish executing.
   - Run "pip3 install webdriver_manager" to install the webdriver
   - Run "pip3 install selenium" to install selenium
 - Open in your favorite IDE for Python or open terminal
-- Navigate to the directory where you downloaded test-wifi.py
+- Navigate to the directory where you placed test-wifi.py
 - Type "python3 test-wifi.py" or "python test-wifi.py" in your terminal
 - Wait about 2 minutes and 15 seconds to see your amazingly accurate results!
