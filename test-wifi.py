@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import logging
 import argparse
@@ -27,7 +28,17 @@ def _setup_driver(headless: bool) -> webdriver.Chrome:
         opts.add_argument("--headless=new")
         opts.add_argument("--no-sandbox")
         opts.add_argument("--disable-dev-shm-usage")
-    s = Service(ChromeDriverManager().install())
+    driver_path = ChromeDriverManager().install()
+    # webdriver-manager sometimes resolves to the wrong file (e.g.
+    # THIRD_PARTY_NOTICES.chromedriver). Always prefer the file named exactly
+    # "chromedriver" in the same directory, and ensure it is executable.
+    driver_dir = os.path.dirname(driver_path)
+    candidate = os.path.join(driver_dir, "chromedriver")
+    if os.path.isfile(candidate):
+        if not os.access(candidate, os.X_OK):
+            os.chmod(candidate, 0o755)
+        driver_path = candidate
+    s = Service(driver_path)
     return webdriver.Chrome(service=s, options=opts)
 
 

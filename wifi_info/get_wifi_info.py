@@ -1,11 +1,14 @@
 """
-get_wifi_info.py — List saved WiFi SSIDs and passwords on Windows, macOS, and Linux.
+get_wifi_info.py — List saved WiFi SSIDs and extended info on Windows, macOS, and Linux.
 
 Windows : uses `netsh wlan`
-macOS   : uses `networksetup` + the system keychain (`security` CLI)
+macOS   : uses `networksetup`, `airport`, `ipconfig`, `system_profiler`
 Linux   : uses `nmcli` (NetworkManager) or reads /etc/NetworkManager/system-connections/
 """
 
+from __future__ import annotations
+
+import json
 import re
 import subprocess
 import sys
@@ -37,16 +40,119 @@ def _get_wifi_windows() -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# macOS
+# macOS helpers
 # ---------------------------------------------------------------------------
 
 def _macos_wifi_interface() -> str | None:
     """Return the first Wi-Fi device name (e.g. 'en0')."""
     output = _run(["networksetup", "-listallhardwareports"])
-    # Look for the device name on the line after "Wi-Fi"
     match = re.search(r"Wi-Fi.*?Device:\s+(\S+)", output, re.DOTALL)
     return match[1] if match else None
 
+
+def _system_profiler_wifi() -> tuple[dict, dict]:
+    """
+    Parse `system_profiler SPAirPortDataType -json`.
+    Returns (nearby_networks, current_network) where each is a dict of fields.
+    nearby_networks is keyed by SSID.
+    """
+    raw = _run(["system_profiler", "SPAirPortDataType", "-json"])
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}, {}
+
+    nearby: dict[str, dict] = {}
+    current: dict = {}
+
+    for entry in data.get("SPAirPortDataType", []):
+        for iface in entry.get("spairport_airport_interfaces", []):
+            for net in iface.get("spairport_airport_other_local_wireless_networks", []):
+                ssid = net.get("_name", "")
+                if ssid:
+                    rssi, noise = _parse_signal_noise(net.get("spairport_signal_noise", ""))
+                    nearby[ssid] = {
+                        "channel": net.get("spairport_network_channel"),
+                        "band": _band_from_channel_str(net.get("spairport_network_channel", "")),
+                        "security": _friendly_security(net.get("spairport_security_mode", "")),
+                        "phy_mode": net.get("spairport_network_phymode"),
+                        "rssi": rssi,
+                        "noise": noise,
+                    }
+
+            cur = iface.get("spairport_current_network_information", {})
+            ssid = cur.get("_name", "")
+            if ssid:
+                rssi, noise = _parse_signal_noise(cur.get("spairport_signal_noise", ""))
+                current = {
+                    "ssid": ssid,
+                    "channel": cur.get("spairport_network_channel"),
+                    "band": _band_from_channel_str(cur.get("spairport_network_channel", "")),
+                    "security": _friendly_security(cur.get("spairport_security_mode", "")),
+                    "phy_mode": cur.get("spairport_network_phymode"),
+                    "tx_rate": cur.get("spairport_network_rate"),
+                    "mcs": cur.get("spairport_network_mcs"),
+                    "rssi": rssi,
+                    "noise": noise,
+                    "mac_address": iface.get("spairport_wireless_mac_address"),
+                }
+
+    return nearby, current
+
+
+def _parse_signal_noise(value: str) -> tuple[str | None, str | None]:
+    """Split 'spairport_signal_noise' like '-46 dBm / -93 dBm' into (rssi, noise)."""
+    parts = value.split("/")
+    if len(parts) == 2:
+        return parts[0].strip() or None, parts[1].strip() or None
+    return value.strip() or None, None
+
+
+def _band_from_channel_str(channel: str) -> str | None:
+    """Extract band from strings like '149 (5GHz, 80MHz)' or '6 (2GHz, 20MHz)'."""
+    m = re.search(r"\((\d+)GHz", channel)
+    if m:
+        return f"{m.group(1)} GHz"
+    return None
+
+
+def _friendly_security(raw: str) -> str | None:
+    """Convert 'spairport_security_mode_wpa2_personal' → 'WPA2 Personal'."""
+    if not raw:
+        return None
+    label = raw.replace("spairport_security_mode_", "").replace("_", " ").title()
+    return label or None
+
+
+def _macos_network_info(iface: str) -> dict:
+    """IP, subnet, router, and DNS for the given interface via networksetup."""
+    info: dict = {}
+    out = _run(["networksetup", "-getinfo", "Wi-Fi"])
+    for line in out.splitlines():
+        if line.startswith("IP address:"):
+            info["ip_address"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Subnet mask:"):
+            info["subnet_mask"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Router:"):
+            info["router"] = line.split(":", 1)[1].strip()
+
+    dns_out = _run(["networksetup", "-getdnsservers", "Wi-Fi"])
+    servers = [l.strip() for l in dns_out.splitlines() if l.strip() and "There aren't" not in l]
+    if servers:
+        info["dns_servers"] = servers
+
+    return info
+
+
+def _macos_current_ssid(iface: str) -> str | None:
+    out = _run(["networksetup", "-getairportnetwork", iface])
+    m = re.search(r"Current Wi-Fi Network:\s+(.+)", out)
+    return m[1].strip() if m else None
+
+
+# ---------------------------------------------------------------------------
+# macOS main
+# ---------------------------------------------------------------------------
 
 def _get_wifi_macos() -> list[dict]:
     iface = _macos_wifi_interface()
@@ -54,23 +160,29 @@ def _get_wifi_macos() -> list[dict]:
         print("Could not detect Wi-Fi interface.", file=sys.stderr)
         return []
 
+    # Saved SSIDs
     output = _run(["networksetup", "-listpreferredwirelessnetworks", iface])
-    # Output format: header line, then one SSID per line with leading whitespace
     lines = output.splitlines()
     ssids = [l.strip() for l in lines[1:] if l.strip()]
 
+    nearby, current = _system_profiler_wifi()
+    # system_profiler redacts SSIDs as "<redacted>", so use networksetup for the real name.
+    current_ssid = _macos_current_ssid(iface)
+    conn_info = _macos_network_info(iface) if current_ssid else {}
+
     profiles = []
     for ssid in ssids:
-        # Retrieve password from the macOS keychain (may prompt for keychain access)
-        result = subprocess.run(
-            ["security", "find-generic-password", "-D", "AirPort network password", "-wa", ssid],
-            stdout=PIPE,
-            stderr=PIPE,
-        )
-        password = result.stdout.decode(errors="replace").strip() or None
-        if result.returncode != 0 and not password:
-            password = None
-        profiles.append({"ssid": ssid, "password": password})
+        profile: dict = {"ssid": ssid, "connected": ssid == current_ssid}
+
+        if ssid == current_ssid:
+            # system_profiler redacts nearby SSIDs but the current network metrics are
+            # still available — we just know which saved network is current via networksetup.
+            for key in ("channel", "band", "security", "phy_mode", "tx_rate", "mcs", "rssi", "noise", "mac_address"):
+                profile[key] = current.get(key)
+            profile.update(conn_info)
+
+        profiles.append(profile)
+
     return profiles
 
 
@@ -79,15 +191,12 @@ def _get_wifi_macos() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 def _get_wifi_linux() -> list[dict]:
-    # Try nmcli first
     result = subprocess.run(
         ["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"],
         stdout=PIPE, stderr=PIPE,
     )
     if result.returncode == 0:
         return _wifi_linux_nmcli(result.stdout.decode(errors="replace"))
-
-    # Fall back to reading connection files directly (may need root)
     return _wifi_linux_files()
 
 
@@ -154,7 +263,7 @@ def main() -> None:
         return
 
     for profile in profiles:
-        print(profile)
+        print(json.dumps(profile, indent=2))
 
 
 if __name__ == "__main__":
